@@ -75,3 +75,11 @@ main:focus{outline:none}.skip-link{position:fixed;top:12px;left:12px;z-index:50;
  .studio-copy>.inline-link{color:var(--accent)}
  .detail-page:has(.studio-layout)::before{background:rgba(21,19,27,.08)}
 }
+
+.site-header,.site-header.over-media{background:transparent;border-bottom:0}
+.over-media .wordmark,.over-media .desktop-nav,.over-media .icon-button{text-shadow:0 1px 5px rgba(14,12,18,.65)}
+@media(max-width:1023px),(max-aspect-ratio:4/3){
+ .hero-image{top:0;height:calc(100% - 320px)}.hero-shade{top:0}
+ .form-art,.studio-image{top:0;height:calc(var(--scene-height) + var(--scene-nav))}
+ .form-page::before,.detail-page:has(.studio-layout)::before{top:0;height:calc(var(--scene-height) + var(--scene-nav))}
+}
