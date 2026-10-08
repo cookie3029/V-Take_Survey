@@ -44,7 +44,7 @@ function Home({openSurvey}){return <>
     <div className="hero-shade"/>
     <div className="hero-content wrap">
       <h1 id="home-title">익숙한 목소리,<br/>새로운 이야기.</h1>
-      <p>버추얼 크리에이터가 배우로 출연하는<br className="mobile-break"/> 영화와 드라마.</p>
+      <p>버추얼 크리에이터가 배우로 출연하는<br className="hero-desktop-break"/>{' '}<span className="hero-format">영화와 드라마.</span></p>
       <div className="hero-actions"><Link className="button primary" to="/notify">공개 알림</Link><button className="button hero-secondary" onClick={openSurvey}>설문하기</button></div>
     </div>
   </section>
