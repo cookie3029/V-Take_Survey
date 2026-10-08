@@ -31,10 +31,16 @@ function Reveal({children,className='',as:Element='div',...props}){
 function Header({path,theme,setTheme}){const [open,setOpen]=useState(false);const toggle=useRef(null);useEffect(()=>{setOpen(false)},[path]);useEffect(()=>{if(!open)return;const key=e=>{if(e.key==='Escape'){setOpen(false);toggle.current?.focus()}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key)},[open]);const themeNames={system:'시스템',light:'밝게',dark:'어둡게'};const ThemeIcon=theme==='system'?Desktop:theme==='dark'?Moon:Sun;return <header className={`site-header ${titles[path]?'over-media':''}`}><div className="nav-shell"><Link to="/" className="wordmark">V-TAKE<span>STUDIO</span></Link><nav className="desktop-nav" aria-label="주 메뉴"><Link to="/studio" aria-current={path==='/studio'?'page':undefined}>스튜디오</Link></nav><div className="nav-actions"><button className="icon-button theme-toggle" onClick={()=>setTheme(theme==='system'?'dark':theme==='dark'?'light':'system')} aria-label={`화면 테마: ${themeNames[theme]}. 눌러 변경`} title={`화면 테마: ${themeNames[theme]}`}><ThemeIcon size={20}/></button><Link to="/notify" className="button primary small" aria-current={path==='/notify'?'page':undefined}>공개 알림</Link><button ref={toggle} className="icon-button menu-toggle" aria-expanded={open} aria-controls="mobile-menu" aria-label={open?'메뉴 닫기':'메뉴 열기'} onClick={()=>setOpen(!open)}>{open?<X size={24}/>:<List size={24}/>}</button></div></div>{open&&<nav id="mobile-menu" className="mobile-nav" aria-label="모바일 주 메뉴"><Link to="/" onClick={()=>setOpen(false)}>홈</Link><Link to="/studio" onClick={()=>setOpen(false)}>스튜디오</Link></nav>}</header>}
 function Footer({openPrivacy}){return <footer className="footer wrap"><div className="footer-top"><Link to="/" className="wordmark">V-TAKE<span>STUDIO</span></Link><div className="footer-links"><Link to="/studio">스튜디오</Link><button className="text-button" onClick={openPrivacy}>개인정보 안내</button></div></div><p className="footer-copy">© 2026 V-TAKE STUDIO</p></footer>}
 function Breadcrumb({name}){return <div className="breadcrumb"><Link to="/">홈</Link><span aria-hidden="true">/</span><span>{name}</span></div>}
-function Art({src,alt,caption,className='',priority=false}){return <figure className={`art ${className}`}><img src={`/assets/${src}.webp`} alt={alt} width="1672" height="941" loading={priority?'eager':'lazy'} fetchPriority={priority?'high':undefined}/>{caption&&<figcaption>{caption}</figcaption>}</figure>}
+function SceneImage({className='',...props}){
+  const ref=useRef(null);
+  const [loaded,setLoaded]=useState(false);
+  useEffect(()=>{setLoaded(ref.current?.complete||false)},[props.src]);
+  return <img {...props} ref={ref} className={`scene-image ${className}${loaded?' is-loaded':''}`} onLoad={()=>setLoaded(true)} onError={()=>setLoaded(true)}/>
+}
+function Art({src,alt,caption,className='',priority=false}){return <figure className={`art ${className}`}><SceneImage src={`/assets/${src}.webp`} alt={alt} width="1672" height="941" loading={priority?'eager':'lazy'} fetchPriority={priority?'high':undefined}/>{caption&&<figcaption>{caption}</figcaption>}</figure>}
 function Home({openSurvey}){return <>
   <section className="hero" aria-labelledby="home-title">
-    <img className="hero-image" src="/assets/hero.webp" alt="비 내리는 밤, 열차 창가에 앉은 버추얼 배우의 장면 콘셉트" width="1672" height="941" fetchPriority="high"/>
+    <SceneImage className="hero-image" src="/assets/hero.webp" alt="비 내리는 밤, 열차 창가에 앉은 버추얼 배우의 장면 콘셉트" width="1672" height="941" fetchPriority="high"/>
     <div className="hero-shade"/>
     <div className="hero-content wrap">
       <h1 id="home-title">익숙한 목소리,<br/>새로운 이야기.</h1>
