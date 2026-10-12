@@ -2,3 +2,5 @@ node_modules
 .sites-runtime/
 .env*
 *.log
+!.env.example
+.DS_Store

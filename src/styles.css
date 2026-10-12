@@ -151,3 +151,5 @@ body{font-weight:300}
 .desktop-nav,.button,.error{font-weight:500}
 .inline-link,.field label,.choices legend{font-weight:400}
 h1,h2,h3,.hero h1,.story-copy h2,.closing-section h2,.detail-page h1,.process-groups h2,.studio-copy .process-groups h2,.dialog-heading h2,.not-found h1{font-weight:700}
+
+.submit-error{margin-top:16px;line-height:1.7}.submit-error:focus{outline:2px solid currentColor;outline-offset:6px}
