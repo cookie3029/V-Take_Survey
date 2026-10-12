@@ -24,11 +24,13 @@ export function createSubscriptionStore({
 
     // The database's UNIQUE constraint resolves concurrent duplicate requests.
     // Tagged-template values are bound parameters, never SQL fragments.
-    await sql`
+    const rows = await sql`
       INSERT INTO public.email_subscriptions (email, consent_version)
       VALUES (${email}, ${consentVersion})
       ON CONFLICT (email) DO NOTHING
+      RETURNING id
     `
+    return rows.length > 0
   }
 }
 

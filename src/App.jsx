@@ -75,11 +75,30 @@ function Home(){return <>
 </>}
 function Studio(){return <section className="detail-page wrap" aria-labelledby="studio-title"><Breadcrumb name="스튜디오"/><div className="studio-layout"><Art src="production" alt="촬영 카메라와 모션캡처 연기자가 있는 협력 제작 환경 콘셉트" caption="제작 환경 콘셉트" className="studio-image" priority/><div className="studio-copy"><h1 id="studio-title">이야기를 시작으로<br/>작품을 만듭니다.</h1><p className="lead">크리에이터의 연기를 한 편의 영화·드라마로 완성할 콘텐츠 스튜디오를 준비합니다.</p><div className="process-groups"><div><h2>이야기와 배역</h2><p>각본 속 인물에 맞는 목소리와 연기를 찾습니다. 출연자를 처음 보는 관객도 이야기를 따라갈 수 있도록 작품을 구성합니다.</p></div><div><h2>연기와 가상 촬영</h2><p>협력 촬영 환경에서 연기를 기록하고 가상 세트의 카메라와 조명으로 장면을 구성할 계획입니다.</p></div><div><h2>검수와 공개</h2><p>인물의 일관성을 살피고 대사, 움직임, 자막을 확인합니다. 콘셉트 구상과 보정에는 AI를 제작 보조 수단으로 활용합니다.</p></div></div><Link to="/notify" className="inline-link">공개 알림</Link></div></div></section>}
 function PrivacyDialog({onClose}){const ref=useRef(null);useEffect(()=>{const previous=document.activeElement;ref.current.showModal();document.body.style.overflow='hidden';return()=>{document.body.style.overflow='';previous?.focus();}},[]);return <dialog ref={ref} className="privacy-dialog" aria-labelledby="privacy-title" onCancel={e=>{e.preventDefault();onClose()}} onClick={e=>{if(e.target===ref.current)onClose()}}><div className="dialog-heading"><h2 id="privacy-title">개인정보 안내</h2><button className="icon-button" autoFocus onClick={onClose} aria-label="개인정보 안내 닫기"><X size={22}/></button></div><p>작품 공개 소식을 받기 위한 이메일 수집·이용 안내입니다.</p><div className="privacy-body"><h3>입력한 정보</h3><p>동의한 이메일 주소와 신청·동의 시각, 동의 안내 버전을 서버의 데이터베이스에 저장합니다.</p><h3>이용 목적</h3><p>저장한 이메일은 V-TAKE STUDIO 작품의 공개 일정과 소식을 안내하는 데 사용합니다. 신청 완료와 동시에 이메일이 발송되지는 않습니다.</p><h3>화면 설정</h3><p>선택한 화면 테마만 이 브라우저에 저장됩니다.</p></div><button className="button primary" onClick={onClose}>확인</button></dialog>}
+function DuplicateSubscriptionDialog({onClose,returnFocusRef}){
+  const ref=useRef(null);
+  useEffect(()=>{
+    const dialog=ref.current;
+    const previousOverflow=document.body.style.overflow;
+    dialog.showModal();
+    document.body.style.overflow='hidden';
+    return()=>{
+      dialog.close();
+      document.body.style.overflow=previousOverflow;
+      returnFocusRef.current?.focus();
+    };
+  },[returnFocusRef]);
+  return <dialog ref={ref} className="privacy-dialog subscription-dialog" role="alertdialog" aria-labelledby="duplicate-title" onCancel={e=>{e.preventDefault();onClose()}}>
+    <div className="dialog-heading"><h2 id="duplicate-title">이미 신청하셨습니다.</h2></div>
+    <button type="button" className="button primary" autoFocus onClick={onClose}>확인</button>
+  </dialog>
+}
 function Notify({openPrivacy}){
   const [email,setEmail]=useState('');
   const [consent,setConsent]=useState(false);
   const [errors,setErrors]=useState({});
   const [state,setState]=useState('idle');
+  const [duplicate,setDuplicate]=useState(false);
   const emailRef=useRef(null);
   const consentRef=useRef(null);
   const errorRef=useRef(null);
@@ -110,6 +129,10 @@ function Notify({openPrivacy}){
         signal:controller.signal,
       });
       const result=await response.json().catch(()=>null);
+      if(response.status===409&&result?.code==='ALREADY_SUBSCRIBED'){
+        if(mounted.current){setState('idle');setDuplicate(true);}
+        return;
+      }
       if(!response.ok||result?.ok!==true)throw new Error(result?.message||'신청을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
       if(mounted.current){setEmail('');setConsent(false);setState('success');}
     }catch(error){
@@ -153,6 +176,7 @@ function Notify({openPrivacy}){
         </form>
       </>}
     </div><Art src="hero" alt="비 내리는 열차 창가의 버추얼 배우 장면" caption="장면 콘셉트" className="form-art" priority/></div>
+    {duplicate&&<DuplicateSubscriptionDialog onClose={()=>setDuplicate(false)} returnFocusRef={emailRef}/>}
   </section>
 }
 function NotFound(){return <section className="not-found wrap"><h1>페이지를 찾을 수 없어요.</h1><p>홈으로 돌아가 스튜디오의 이야기를 살펴보세요.</p><Link className="button primary" to="/">홈으로</Link></section>}

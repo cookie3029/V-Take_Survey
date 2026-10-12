@@ -153,3 +153,4 @@ body{font-weight:300}
 h1,h2,h3,.hero h1,.story-copy h2,.closing-section h2,.detail-page h1,.process-groups h2,.studio-copy .process-groups h2,.dialog-heading h2,.not-found h1{font-weight:700}
 
 .submit-error{margin-top:16px;line-height:1.7}.submit-error:focus{outline:2px solid currentColor;outline-offset:6px}
+.subscription-dialog{width:min(420px,calc(100% - 40px))}.subscription-dialog .dialog-heading{margin-bottom:24px}.subscription-dialog .dialog-heading h2{font-size:clamp(20px,5vw,24px);line-height:1.5}

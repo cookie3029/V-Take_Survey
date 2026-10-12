@@ -4,6 +4,21 @@ import { saveSubscription, SubscriptionConfigurationError } from './database.js'
 const MAX_BODY_BYTES = 4096
 const LOCAL_PART = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+$/
 const DOMAIN_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
+const SQLSTATE_CATEGORIES = new Map([
+  ['42P01', 'table_missing'],
+  ['42703', 'column_missing'],
+  ['42P10', 'unique_constraint_missing'],
+  ['42501', 'permission_denied'],
+  ['28P01', 'authentication_failed'],
+  ['28000', 'authentication_failed'],
+  ['08000', 'connection_failure'],
+  ['08001', 'connection_failure'],
+  ['08003', 'connection_failure'],
+  ['08004', 'connection_failure'],
+  ['08006', 'connection_failure'],
+  ['08007', 'connection_failure'],
+  ['08P01', 'connection_failure'],
+])
 
 class RequestError extends Error {
   constructor(status, message) {
@@ -17,6 +32,21 @@ function jsonResponse(payload, status = 200, extraHeaders = {}) {
     status,
     headers: { 'Cache-Control': 'no-store', ...extraHeaders },
   })
+}
+
+function subscriptionFailureDiagnostic(error) {
+  const diagnostic = { event: 'subscription_save_failed', category: 'persistence_failure' }
+  if (error instanceof SubscriptionConfigurationError) {
+    return { ...diagnostic, category: 'configuration_missing' }
+  }
+
+  // Driver messages, stacks, and other fields may contain credentials or email.
+  // Only known SQLSTATE values are allowed into the diagnostic object.
+  const code = error?.code
+  const category = typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)
+    ? SQLSTATE_CATEGORIES.get(code)
+    : undefined
+  return category ? { ...diagnostic, category, sqlState: code } : diagnostic
 }
 
 function normalizeEmail(value) {
@@ -82,7 +112,10 @@ async function readPayload(request) {
   return payload
 }
 
-export function createSubscribeHandler({ persist = saveSubscription } = {}) {
+export function createSubscribeHandler({
+  persist = saveSubscription,
+  reportDiagnostic = (diagnostic) => console.error(diagnostic),
+} = {}) {
   return async function subscribe(request) {
     if (request.method !== 'POST') {
       return jsonResponse({ ok: false, message: 'POST 요청만 지원합니다.' }, 405, { Allow: 'POST' })
@@ -116,15 +149,26 @@ export function createSubscribeHandler({ persist = saveSubscription } = {}) {
     }
 
     try {
-      await persist(email, CONSENT_VERSION)
+      const inserted = await persist(email, CONSENT_VERSION)
+      if (!inserted) {
+        return jsonResponse({
+          ok: false,
+          code: 'ALREADY_SUBSCRIBED',
+          message: '이미 신청하셨습니다.',
+        }, 409)
+      }
     } catch (error) {
+      try {
+        await reportDiagnostic(subscriptionFailureDiagnostic(error))
+      } catch {
+        // Diagnostic reporting must not prevent the safe failure response.
+      }
       const message = error instanceof SubscriptionConfigurationError
         ? '구독 서비스를 준비 중입니다. 잠시 후 다시 시도해 주세요.'
         : '지금은 구독을 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.'
       return jsonResponse({ ok: false, message }, 503)
     }
 
-    // New and existing subscribers receive the same response.
     return jsonResponse({ ok: true })
   }
 }

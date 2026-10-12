@@ -23,7 +23,7 @@ test('Vercel endpoint exposes the Web Standard fetch handler', () => {
 
 test('only POST JSON requests are accepted; errors never write to the database', async () => {
   let writes = 0
-  const handler = createSubscribeHandler({ persist: async () => { writes += 1 } })
+  const handler = createSubscribeHandler({ persist: async () => { writes += 1; return true } })
   const get = await handler(new Request('https://vtake.example/api/subscribe'))
   assert.equal(get.status, 405)
   assert.equal(get.headers.get('allow'), 'POST')
@@ -38,7 +38,7 @@ test('only POST JSON requests are accepted; errors never write to the database',
 
 test('cross-origin browser requests are rejected and same-origin JSON is accepted', async () => {
   let writes = 0
-  const handler = createSubscribeHandler({ persist: async () => { writes += 1 } })
+  const handler = createSubscribeHandler({ persist: async () => { writes += 1; return true } })
   const blocked = await handler(request(VALID_PAYLOAD, { headers: { Origin: 'https://other.example' } }))
   assert.equal(blocked.status, 403)
   assert.equal(blocked.headers.get('access-control-allow-origin'), null)
@@ -53,7 +53,7 @@ test('cross-origin browser requests are rejected and same-origin JSON is accepte
 
 test('malformed JSON and non-object payloads fail without a database write', async () => {
   let writes = 0
-  const handler = createSubscribeHandler({ persist: async () => { writes += 1 } })
+  const handler = createSubscribeHandler({ persist: async () => { writes += 1; return true } })
   for (const payload of [null, [], 'creator@example.com', 42, true]) {
     assert.equal((await handler(request(payload))).status, 400)
   }
@@ -64,7 +64,7 @@ test('malformed JSON and non-object payloads fail without a database write', asy
 
 test('invalid email values and addresses are rejected', async () => {
   let writes = 0
-  const handler = createSubscribeHandler({ persist: async () => { writes += 1 } })
+  const handler = createSubscribeHandler({ persist: async () => { writes += 1; return true } })
   const emails = [
     null, 2, {}, [], '', '  ', 'creator', 'creator@example',
     'creator@@example.com', 'creator @example.com', '.creator@example.com',
@@ -81,7 +81,7 @@ test('invalid email values and addresses are rejected', async () => {
 
 test('explicit true consent and the current consent version are required', async () => {
   let writes = 0
-  const handler = createSubscribeHandler({ persist: async () => { writes += 1 } })
+  const handler = createSubscribeHandler({ persist: async () => { writes += 1; return true } })
   const payloads = [
     { email: VALID_PAYLOAD.email, consentVersion: CONSENT_VERSION },
     { ...VALID_PAYLOAD, consent: false },
@@ -96,7 +96,7 @@ test('explicit true consent and the current consent version are required', async
 
 test('body size is bounded with and without a Content-Length header', async () => {
   let writes = 0
-  const handler = createSubscribeHandler({ persist: async () => { writes += 1 } })
+  const handler = createSubscribeHandler({ persist: async () => { writes += 1; return true } })
   const declared = await handler(request(VALID_PAYLOAD, { headers: { 'Content-Length': '4097' } }))
   assert.equal(declared.status, 413)
 
@@ -113,6 +113,7 @@ test('email is normalized and success waits for persistence; response contains n
     persist: async (email, consentVersion) => {
       stored = { email, consentVersion }
       await storedPromise
+      return true
     },
   })
   let responded = false
@@ -131,14 +132,16 @@ test('email is normalized and success waits for persistence; response contains n
 test('missing database configuration is lazy and returns a safe 503', async () => {
   let reads = 0
   let created = 0
+  const diagnostics = []
   const persist = createSubscriptionStore({
     getDatabaseUrl: () => { reads += 1; return undefined },
     createSql: () => { created += 1; throw new Error('Must not initialize') },
   })
-  const handler = createSubscribeHandler({ persist })
+  const handler = createSubscribeHandler({ persist, reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic) })
   assert.equal(reads, 0)
   assert.equal((await handler(request({ ...VALID_PAYLOAD, consent: false }))).status, 400)
   assert.equal(reads, 0)
+  assert.deepEqual(diagnostics, [])
   const response = await handler(request())
   assert.equal(response.status, 503)
   assert.deepEqual(await response.json(), {
@@ -147,22 +150,117 @@ test('missing database configuration is lazy and returns a safe 503', async () =
   })
   assert.equal(reads, 1)
   assert.equal(created, 0)
+  assert.deepEqual(diagnostics, [{ event: 'subscription_save_failed', category: 'configuration_missing' }])
 })
 
 test('database errors do not leak database credentials or the submitted email', async () => {
+  const diagnostics = []
+  const secret = 'secret creator@example.com postgres://private-user:secret@example/database'
   const persist = createSubscriptionStore({
     getDatabaseUrl: () => 'postgres://private-user:secret@example/database',
-    createSql: () => async () => { throw new Error('secret creator@example.com postgres://private-user') },
+    createSql: () => async () => {
+      throw Object.assign(new Error(secret), {
+        name: secret,
+        detail: secret,
+        hint: secret,
+        internalQuery: secret,
+        sourceError: new Error(secret),
+      })
+    },
   })
-  const response = await createSubscribeHandler({ persist })(request())
+  const handler = createSubscribeHandler({
+    persist,
+    reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  })
+  const response = await handler(request())
   assert.equal(response.status, 503)
   assert.deepEqual(await response.json(), {
     ok: false,
     message: '지금은 구독을 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.',
   })
+  assert.deepEqual(diagnostics, [{ event: 'subscription_save_failed', category: 'persistence_failure' }])
+  assert.doesNotMatch(JSON.stringify(diagnostics), /secret|creator@example\.com|postgres:\/\//)
 })
 
-test('insert uses bound values and one atomic conflict-safe query; duplicate requests have identical responses', async () => {
+test('known SQLSTATE errors produce only the fixed diagnostic fields', async () => {
+  const cases = [
+    ['42P01', 'table_missing'],
+    ['42703', 'column_missing'],
+    ['42P10', 'unique_constraint_missing'],
+    ['42501', 'permission_denied'],
+    ['28P01', 'authentication_failed'],
+    ['28000', 'authentication_failed'],
+    ['08000', 'connection_failure'],
+    ['08001', 'connection_failure'],
+    ['08003', 'connection_failure'],
+    ['08004', 'connection_failure'],
+    ['08006', 'connection_failure'],
+    ['08007', 'connection_failure'],
+    ['08P01', 'connection_failure'],
+  ]
+  for (const [code, category] of cases) {
+    const diagnostics = []
+    const secret = 'secret creator@example.com postgres://private-user:secret@example/database'
+    const handler = createSubscribeHandler({
+      persist: async () => {
+        throw Object.assign(new Error(secret), { code, name: secret, detail: secret, hint: secret })
+      },
+      reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    })
+    const response = await handler(request())
+    assert.equal(response.status, 503)
+    assert.deepEqual(await response.json(), {
+      ok: false,
+      message: '지금은 구독을 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.',
+    })
+    assert.deepEqual(diagnostics, [{ event: 'subscription_save_failed', category, sqlState: code }])
+    assert.doesNotMatch(JSON.stringify(diagnostics), /secret|creator@example\.com|postgres:\/\//)
+  }
+})
+
+test('unrecognized or malformed SQLSTATE fields are omitted from diagnostics', async () => {
+  for (const code of [undefined, null, 42, '', '42p01', '42P01\n', 'ZZZZZ', '08ZZZ', 'creator@example.com', 'postgres://secret']) {
+    const diagnostics = []
+    const handler = createSubscribeHandler({
+      persist: async () => { throw Object.assign(new Error('secret'), { code }) },
+      reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    })
+    assert.equal((await handler(request())).status, 503)
+    assert.deepEqual(diagnostics, [{ event: 'subscription_save_failed', category: 'persistence_failure' }])
+  }
+})
+
+test('diagnostic reporter exceptions preserve the safe 503 response', async () => {
+  for (const reportDiagnostic of [
+    () => { throw new Error('secret reporter failure') },
+    async () => { throw new Error('secret reporter failure') },
+  ]) {
+    const handler = createSubscribeHandler({
+      persist: async () => { throw new Error('secret database failure') },
+      reportDiagnostic,
+    })
+    const response = await handler(request())
+    assert.equal(response.status, 503)
+    assert.deepEqual(await response.json(), {
+      ok: false,
+      message: '지금은 구독을 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.',
+    })
+  }
+})
+
+test('the default reporter logs only the sanitized diagnostic to console.error', async (t) => {
+  const reporter = t.mock.method(console, 'error', () => {})
+  const handler = createSubscribeHandler({
+    persist: async () => { throw Object.assign(new Error('secret creator@example.com'), { code: '42P01' }) },
+  })
+  assert.equal((await handler(request())).status, 503)
+  assert.equal(reporter.mock.calls.length, 1)
+  assert.deepEqual(reporter.mock.calls[0].arguments, [
+    { event: 'subscription_save_failed', category: 'table_missing', sqlState: '42P01' },
+  ])
+})
+
+test('concurrent duplicate requests return one success and seven conflicts through one atomic insert each', async () => {
   const calls = []
   let initialized = 0
   const stored = new Set()
@@ -181,9 +279,15 @@ test('insert uses bound values and one atomic conflict-safe query; duplicate req
   const handler = createSubscribeHandler({ persist })
   const payload = { ...VALID_PAYLOAD, email: "O'Hara@Example.com" }
   const responses = await Promise.all(Array.from({ length: 8 }, () => handler(request(payload))))
+  assert.equal(responses.filter((response) => response.status === 200).length, 1)
+  assert.equal(responses.filter((response) => response.status === 409).length, 7)
   for (const response of responses) {
-    assert.equal(response.status, 200)
-    assert.deepEqual(await response.json(), { ok: true })
+    assert.equal(response.headers.get('cache-control'), 'no-store')
+    assert.deepEqual(await response.json(), response.status === 200 ? { ok: true } : {
+      ok: false,
+      code: 'ALREADY_SUBSCRIBED',
+      message: '이미 신청하셨습니다.',
+    })
   }
   assert.equal(initialized, 1)
   assert.equal(calls.length, 8)
@@ -191,7 +295,46 @@ test('insert uses bound values and one atomic conflict-safe query; duplicate req
   for (const call of calls) {
     assert.match(call.text, /INSERT INTO public\.email_subscriptions/)
     assert.match(call.text, /ON CONFLICT \(email\) DO NOTHING/)
-    assert.doesNotMatch(call.text, /SELECT|RETURNING|o'hara|2026-10-12/i)
+    assert.match(call.text, /RETURNING id/)
+    assert.doesNotMatch(call.text, /SELECT|UPDATE|o'hara|2026-10-12/i)
     assert.deepEqual(call.values, ["o'hara@example.com", CONSENT_VERSION])
   }
+})
+
+test('a normalized existing email returns the duplicate warning without changing its original consent', async () => {
+  const original = Object.freeze({
+    id: 42,
+    email: 'creator@example.com',
+    created_at: '2026-10-01T00:00:00.000Z',
+    consented_at: '2026-10-01T00:00:00.000Z',
+    consent_version: '2026-10-01',
+  })
+  const stored = new Map([[original.email, original]])
+  const calls = []
+  const diagnostics = []
+  const persist = createSubscriptionStore({
+    getDatabaseUrl: () => 'postgres://offline-test/database',
+    createSql: () => async (strings, ...values) => {
+      const text = strings.join('?')
+      calls.push({ text, values })
+      assert.match(text, /ON CONFLICT \(email\) DO NOTHING/)
+      assert.doesNotMatch(text, /SELECT|UPDATE/i)
+      return stored.has(values[0]) ? [] : [{ id: 43 }]
+    },
+  })
+  const handler = createSubscribeHandler({
+    persist,
+    reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  })
+  const response = await handler(request({ ...VALID_PAYLOAD, email: '  Creator@EXAMPLE.COM  ' }))
+  assert.equal(response.status, 409)
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    code: 'ALREADY_SUBSCRIBED',
+    message: '이미 신청하셨습니다.',
+  })
+  assert.deepEqual(calls.map((call) => call.values), [['creator@example.com', CONSENT_VERSION]])
+  assert.equal(stored.size, 1)
+  assert.equal(stored.get(original.email), original)
+  assert.deepEqual(diagnostics, [])
 })
